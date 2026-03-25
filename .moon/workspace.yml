@@ -1,7 +1,9 @@
 # Configures all projects within the workspace to create a project graph.
 # Accepts a list of globs, a mapping of projects to relative file paths,
 # or both values.
-projects: ["packages/*"]
+projects:
+  - goLibs: 'libs/go'
+  - identity: 'services/go/iam/identity'
 
 # Configures the version control system (VCS). Also known as
 # source code management (SCM).
@@ -14,4 +16,8 @@ vcs:
   # @since 1.8.0
   # @values "bitbucket" | "github" | "gitlab" | "other"
   provider: "github"
+  client: 'git'
 
+inheritedEnv:
+  APP_STAGE: 'development'
+  LOG_LEVEL: 'debug'

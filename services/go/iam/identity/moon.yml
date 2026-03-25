@@ -1,0 +1,30 @@
+layer: 'application'
+language: 'go'
+
+dependsOn:
+  - 'goLibs'
+
+tasks:
+  build:
+    command: 'go build -o bin/identity ./cmd/identity'
+    inputs:
+      - 'cmd/**/*.go'
+      - 'internal/**/*.go'
+      - 'pkg/**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+
+  test:
+    command: 'go test -v ./...'
+    inputs:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+
+  tidy:
+    command: 'go mod tidy'
+
+tags:
+  - 'backend'
+  - 'service'
+  - 'identity'
