@@ -22,9 +22,9 @@ func runCommand() {
 	command := os.Args[1]
 
 	switch command {
-	case "server":
+	case "serve":
 		runServer(cfg)
-	case "migration":
+	case "migrate":
 		runMigration(cfg)
 	}
 }
