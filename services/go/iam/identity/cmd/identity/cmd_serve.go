@@ -5,13 +5,14 @@ import (
 	stdHttp "net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	libDatabase "github.com/tea0112/omnitat/libs/go/database"
 	"github.com/tea0112/omnitat/libs/go/datetime"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/repositories"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/services"
 	userHttp "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/config"
-	httpapi "github.com/tea0112/omnitat/services/go/iam/identity/internal/http"
 )
 
 func runServer(cfg *config.Config) error {
@@ -27,20 +28,24 @@ func runServer(cfg *config.Config) error {
 	userService := services.NewUserService(userRepo, clock)
 	userHandler := userHttp.NewUserHandler(userService)
 
-	// Create API router with /api prefix
-	apiRouter := httpapi.NewAPIRouter("/api")
-	apiRouter.Register(userHandler)
+	r := chi.NewRouter()
 
-	// Create main mux
-	mux := stdHttp.NewServeMux()
-	mux.Handle("/", apiRouter.Handler())
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
 
-	// Wrap with global middleware
-	handler := httpapi.Logger(httpapi.Recoverer(mux))
+	r.Get("/", func(w stdHttp.ResponseWriter, r *stdHttp.Request) {
+		w.Write([]byte("identity service"))
+	})
+
+	r.Route("/api/v1", func(r chi.Router) {
+		userHandler.RegisterV1(r)
+	})
 
 	server := &stdHttp.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTP.Port),
-		Handler:      handler,
+		Handler:      r,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
