@@ -28,7 +28,7 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: validate request
-	if req.Email == "" || req.Password == "" {
+	if req.Email == "" || req.Password == "" || req.FirstName == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).
 			Encode(libHttp.ErrorResponseCode("INVALID_DATA", "invalid data"))
