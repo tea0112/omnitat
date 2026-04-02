@@ -9,7 +9,7 @@ import (
 // Routes implements the http.Router interface
 func (h *UserHandler) Routes() map[string]http.Handler {
 	return map[string]http.Handler{
-		"POST /users": http.HandlerFunc(h.CreateUser),
+		"/users": http.HandlerFunc(h.CreateUser),
 	}
 }
 

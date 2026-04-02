@@ -41,15 +41,12 @@ func (r *APIRouter) Routes() map[string]stdHttp.Handler {
 
 // Handler returns the http.Handler with all routes registered under prefix
 func (r *APIRouter) Handler() stdHttp.Handler {
-	// Register all routers
 	for _, router := range r.routers {
 		for pattern, handler := range router.Routes() {
-			fullPattern := r.prefix + pattern
-			r.mux.Handle(fullPattern, handler)
+			r.mux.Handle(pattern, handler)
 		}
 	}
 
-	// Return the mux wrapped with prefix stripping
 	return stdHttp.StripPrefix(strings.TrimSuffix(r.prefix, "/"), r.mux)
 }
 
