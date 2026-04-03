@@ -28,9 +28,5 @@ func (i *UserRepositoryImpl) CreateUser(ctx context.Context, user *models.User) 
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }

@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/tea0112/omnitat/libs/go/datetime"
 	"github.com/tea0112/omnitat/libs/go/security"
@@ -11,26 +13,24 @@ import (
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http/dto"
 )
 
-// TODO: business logic, interface repo, domain rule
-// TODO: Unit of Work
-
 type UserServiceImpl struct {
 	clock          datetime.Clock
 	userRepository UserRepository
 }
 
 func NewUserService(
-	userRepositoryImpl *repositories.UserRepositoryImpl,
+	userRepo *repositories.UserRepositoryImpl,
 	realClock datetime.Clock,
 ) *UserServiceImpl {
 	return &UserServiceImpl{
-		userRepository: userRepositoryImpl,
+		userRepository: userRepo,
 		clock:          realClock,
 	}
 }
 
 func (svc *UserServiceImpl) CreateUser(ctx context.Context, createUserDTO *dto.CreateUserDTO) (*models.User, error) {
-	user, err := models.NewUser(svc.clock.Now())
+	now := svc.clock.Now()
+	user, err := models.NewUser(now)
 	if err != nil {
 		slog.Error(err.Error())
 		return nil, err
@@ -39,6 +39,7 @@ func (svc *UserServiceImpl) CreateUser(ctx context.Context, createUserDTO *dto.C
 	user.Email = &createUserDTO.Email
 	user.FirstName = &createUserDTO.FirstName
 	user.LastName = &createUserDTO.LastName
+
 	passwordHash, err := security.HashPassword(createUserDTO.Password)
 	if err != nil {
 		return nil, err
@@ -47,8 +48,21 @@ func (svc *UserServiceImpl) CreateUser(ctx context.Context, createUserDTO *dto.C
 
 	err = svc.userRepository.CreateUser(ctx, user)
 	if err != nil {
+		slog.Error("failed to create user: " + err.Error())
+		if isDuplicateKeyError(err) {
+			return nil, errors.New("EMAIL_ALREADY_EXISTS")
+		}
 		return nil, err
 	}
 
+	slog.Info("user created", "user_id", user.Id.String(), "email", createUserDTO.Email)
+
 	return user, nil
+}
+
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint")
 }
