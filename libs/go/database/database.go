@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -47,4 +48,10 @@ func NewDatabaseConnection(cfg *DatabaseConfig) (*sql.DB, error) {
 	db.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 
 	return db, nil
+}
+
+type Querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
