@@ -23,8 +23,16 @@ func runCommand() {
 
 	switch command {
 	case "serve":
-		runServer(cfg)
+		err = runServer(cfg)
 	case "migrate":
-		runMigration(cfg)
+		err = runMigration(cfg)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Command failed: %v\n", err)
+		os.Exit(1)
 	}
 }

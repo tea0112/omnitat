@@ -11,6 +11,14 @@ import (
 type Config struct {
 	HTTP     libHttp.Config
 	Database libDatabase.DatabaseConfig
+	Auth     AuthConfig
+}
+
+type AuthConfig struct {
+	JWTIssuer       string
+	JWTAccessSecret string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 func Load() (*Config, error) {
@@ -42,6 +50,24 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.Database.ConnMaxIdleTime = dbConnMaxIdleTimeDuration
+
+	// Auth config
+	cfg.Auth.JWTIssuer = config.GetEnv("JWT_ISSUER", "identity-service")
+	cfg.Auth.JWTAccessSecret = config.GetEnv("JWT_ACCESS_SECRET", "dev-access-secret")
+
+	accessTokenTTLStr := config.GetEnv("JWT_ACCESS_TTL", "15m")
+	accessTokenTTL, err := time.ParseDuration(accessTokenTTLStr)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Auth.AccessTokenTTL = accessTokenTTL
+
+	refreshTokenTTLStr := config.GetEnv("REFRESH_TOKEN_TTL", "720h")
+	refreshTokenTTL, err := time.ParseDuration(refreshTokenTTLStr)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Auth.RefreshTokenTTL = refreshTokenTTL
 
 	return &cfg, nil
 }

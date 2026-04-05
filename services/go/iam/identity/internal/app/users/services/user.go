@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/models"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/repositories"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http/dto"
+	"github.com/tea0112/omnitat/services/go/iam/identity/pkg/apperrors"
 )
 
 type UserServiceImpl struct {
@@ -50,7 +50,7 @@ func (svc *UserServiceImpl) CreateUser(ctx context.Context, createUserDTO *dto.C
 	if err != nil {
 		slog.Error("failed to create user: " + err.Error())
 		if isDuplicateKeyError(err) {
-			return nil, errors.New("EMAIL_ALREADY_EXISTS")
+			return nil, apperrors.ErrEmailAlreadyExists
 		}
 		return nil, err
 	}

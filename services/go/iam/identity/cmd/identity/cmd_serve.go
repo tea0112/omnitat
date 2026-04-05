@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	stdHttp "net/http"
 	"time"
 
@@ -9,8 +10,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	libDatabase "github.com/tea0112/omnitat/libs/go/database"
 	"github.com/tea0112/omnitat/libs/go/datetime"
+	authRepositories "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/repositories"
+	authServices "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/services"
+	authHttp "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/transport/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/repositories"
-	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/services"
+	userServices "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/services"
 	userHttp "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/config"
 )
@@ -24,9 +28,20 @@ func runServer(cfg *config.Config) error {
 
 	clock := &datetime.RealClock{}
 
+	// user feature
 	userRepo := repositories.NewUserRepository(db)
-	userService := services.NewUserService(userRepo, clock)
+	userService := userServices.NewUserService(userRepo, clock)
 	userHandler := userHttp.NewUserHandler(userService)
+
+	// auth feature
+	refreshTokenRepo := authRepositories.NewRefreshTokenRepository(db)
+	authService := authServices.NewAuthService(userRepo, refreshTokenRepo, clock, authServices.TokenConfig{
+		JWTIssuer:       cfg.Auth.JWTIssuer,
+		JWTAccessSecret: cfg.Auth.JWTAccessSecret,
+		AccessTokenTTL:  cfg.Auth.AccessTokenTTL,
+		RefreshTokenTTL: cfg.Auth.RefreshTokenTTL,
+	})
+	authHandler := authHttp.NewAuthHandler(*authService)
 
 	r := chi.NewRouter()
 
@@ -39,8 +54,14 @@ func runServer(cfg *config.Config) error {
 		w.Write([]byte("identity service"))
 	})
 
+	r.Get("/healthcheck", func(w stdHttp.ResponseWriter, r *stdHttp.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("identity service OK!"))
+	})
+
 	r.Route("/api/v1", func(r chi.Router) {
 		userHandler.RegisterV1(r)
+		authHandler.RegisterV1(r)
 	})
 
 	server := &stdHttp.Server{

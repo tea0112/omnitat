@@ -2,12 +2,15 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 
 	httpLib "github.com/tea0112/omnitat/libs/go/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/models"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http/dto"
+	"github.com/tea0112/omnitat/services/go/iam/identity/pkg/apperrors"
+	"github.com/tea0112/omnitat/services/go/iam/identity/pkg/exception"
 )
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -46,38 +49,38 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(dto.ErrorCode.INVALID_JSON, err.Error()))
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidJSON.Code, exception.ErrInvalidJSON.DefaultMessage))
 		return
 	}
 
 	if req.Email == "" || req.Password == "" || req.FirstName == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(dto.ErrorCode.INVALID_DATA, "email, password, and first_name are required"))
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidData.Code, "email, password, and first_name are required"))
 		return
 	}
 
 	if !emailRegex.MatchString(req.Email) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(dto.ErrorCode.INVALID_EMAIL, "invalid email format"))
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidEmail.Code, exception.ErrInvalidEmail.DefaultMessage))
 		return
 	}
 
 	if len(req.Password) < MinPasswordLength {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(dto.ErrorCode.WEAK_PASSWORD, "password must be at least 8 characters"))
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrWeakPassword.Code, exception.ErrWeakPassword.DefaultMessage))
 		return
 	}
 
 	user, err := h.userService.CreateUser(r.Context(), &req)
 	if err != nil {
-		code := dto.ErrorCode.CREATE_FAILED
-		if err.Error() == "EMAIL_ALREADY_EXISTS" {
-			code = dto.ErrorCode.EMAIL_ALREADY_EXISTS
+		if errors.Is(err, apperrors.ErrEmailAlreadyExists) {
 			w.WriteHeader(http.StatusConflict)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrEmailAlreadyExists.Code, exception.ErrEmailAlreadyExists.DefaultMessage))
+			return
 		}
-		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(code, err.Error()))
+
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrCreateFailed.Code, exception.ErrCreateFailed.DefaultMessage))
 		return
 	}
 

@@ -35,3 +35,43 @@ func BuildCreateUserSql() string {
 
 	return sql
 }
+
+func BuildFindUserByEmailSql() string {
+	f := models.UserFields()
+
+	return fmt.Sprintf(
+		"SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s FROM %s WHERE LOWER(%s) = LOWER($1) AND %s IS NULL LIMIT 1",
+		f.IdColumn,
+		f.EmailColumn,
+		f.PasswordHashColumn,
+		f.FirstNameColumn,
+		f.LastNameColumn,
+		f.IsActiveColumn,
+		f.CreatedAtColumn,
+		f.UpdatedAtColumn,
+		f.DeletedAtColumn,
+		f.TableName,
+		f.EmailColumn,
+		f.DeletedAtColumn,
+	)
+}
+
+func BuildFindUserByIDSql() string {
+	f := models.UserFields()
+
+	return fmt.Sprintf(
+		"SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s FROM %s WHERE %s = $1 AND %s IS NULL LIMIT 1",
+		f.IdColumn,
+		f.EmailColumn,
+		f.PasswordHashColumn,
+		f.FirstNameColumn,
+		f.LastNameColumn,
+		f.IsActiveColumn,
+		f.CreatedAtColumn,
+		f.UpdatedAtColumn,
+		f.DeletedAtColumn,
+		f.TableName,
+		f.IdColumn,
+		f.DeletedAtColumn,
+	)
+}
