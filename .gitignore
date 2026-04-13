@@ -20,6 +20,9 @@ profile.cov
 # Build output
 bin/
 
+# Moon cache/output
+.moon/cache/
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
@@ -27,8 +30,10 @@ bin/
 go.work
 go.work.sum
 
-# env file
-.env
+# env files
+.env*
+!.env.example
+!env.example
 
 # Editor/IDE
 # .idea/

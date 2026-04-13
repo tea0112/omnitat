@@ -4,25 +4,97 @@ language: 'go'
 dependsOn:
   - 'goLibs'
 
+fileGroups:
+  buildSources:
+    - 'cmd/**/*.go'
+    - 'internal/**/*.go'
+    - 'pkg/**/*.go'
+    - 'go.mod'
+    - 'go.sum'
+  testSources:
+    - '**/*.go'
+    - 'go.mod'
+    - 'go.sum'
+
 tasks:
   build:
-    command: 'go build -o bin/identity ./cmd/identity'
+    command: 'go'
+    args:
+      - 'build'
+      - '-o'
+      - 'bin/identity'
+      - './cmd/identity'
     inputs:
-      - 'cmd/**/*.go'
-      - 'internal/**/*.go'
-      - 'pkg/**/*.go'
-      - 'go.mod'
-      - 'go.sum'
+      - '@group(buildSources)'
 
   test:
-    command: 'go test -v ./...'
+    command: 'go'
+    args:
+      - 'test'
+      - '-v'
+      - './...'
     inputs:
-      - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
+      - '@group(testSources)'
+
+  buildLocal:
+    command: 'go'
+    args:
+      - 'build'
+      - '-o'
+      - 'bin/identity'
+      - './cmd/identity'
+    inputs:
+      - '@group(buildSources)'
+    options:
+      envFile:
+        - '.env'
+        - '.env.local'
+
+  testLocal:
+    command: 'go'
+    args:
+      - 'test'
+      - '-v'
+      - './...'
+    inputs:
+      - '@group(testSources)'
+    options:
+      envFile:
+        - '.env'
+        - '.env.local'
+
+  buildDev:
+    command: 'go'
+    args:
+      - 'build'
+      - '-o'
+      - 'bin/identity'
+      - './cmd/identity'
+    inputs:
+      - '@group(buildSources)'
+    options:
+      envFile:
+        - '.env'
+        - '.env.dev'
+
+  testDev:
+    command: 'go'
+    args:
+      - 'test'
+      - '-v'
+      - './...'
+    inputs:
+      - '@group(testSources)'
+    options:
+      envFile:
+        - '.env'
+        - '.env.dev'
 
   tidy:
-    command: 'go mod tidy'
+    command: 'go'
+    args:
+      - 'mod'
+      - 'tidy'
 
 tags:
   - 'backend'

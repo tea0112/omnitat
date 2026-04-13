@@ -2,8 +2,9 @@
 # Accepts a list of globs, a mapping of projects to relative file paths,
 # or both values.
 projects:
-  - goLibs: 'libs/go'
-  - identity: 'services/go/iam/identity'
+  sources:
+    goLibs: 'libs/go'
+    identity: 'services/go/iam/identity'
 
 # Configures the version control system (VCS). Also known as
 # source code management (SCM).
@@ -17,7 +18,3 @@ vcs:
   # @values "bitbucket" | "github" | "gitlab" | "other"
   provider: "github"
   client: 'git'
-
-inheritedEnv:
-  APP_STAGE: 'development'
-  LOG_LEVEL: 'debug'

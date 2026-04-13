@@ -1,2 +1,26 @@
 layer: 'library'
 language: 'go'
+
+fileGroups:
+  sources:
+    - '**/*.go'
+    - 'go.mod'
+    - 'go.sum'
+
+tasks:
+  build:
+    command: 'go'
+    args:
+      - 'build'
+      - './...'
+    inputs:
+      - '@group(sources)'
+
+  test:
+    command: 'go'
+    args:
+      - 'test'
+      - '-v'
+      - './...'
+    inputs:
+      - '@group(sources)'
