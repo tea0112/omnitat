@@ -8,6 +8,9 @@ import (
 
 func (h *AuthHandler) RegisterV1(r chi.Router) {
 	r.Route("/auth", func(r chi.Router) {
-		r.Post("/login", http.HandlerFunc(h.Login))
+		r.Post("/signin", http.HandlerFunc(h.SignIn))
+		r.Post("/signup", http.HandlerFunc(h.SignUp))
+		r.Post("/refresh", http.HandlerFunc(h.Refresh))
+		r.Post("/logout", http.HandlerFunc(h.Logout))
 	})
 }

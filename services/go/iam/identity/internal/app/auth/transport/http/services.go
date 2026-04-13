@@ -8,7 +8,8 @@ import (
 )
 
 type AuthService interface {
-	Login(context.Context, dto.LoginRequestDTO) (*domains.Login, error)
-	Refresh() error
-	Logout() error
+	SignIn(context.Context, dto.SignInRequestDTO) (*domains.Session, error)
+	SignUp(context.Context, dto.SignUpRequestDTO) (*domains.Session, error)
+	Refresh(context.Context, dto.RefreshRequestDTO) (*domains.TokenPair, error)
+	Logout(context.Context, dto.LogoutRequestDTO) error
 }

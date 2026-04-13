@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	stdHttp "net/http"
@@ -8,14 +9,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/redis/go-redis/v9"
 	libDatabase "github.com/tea0112/omnitat/libs/go/database"
 	"github.com/tea0112/omnitat/libs/go/datetime"
 	authRepositories "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/repositories"
 	authServices "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/services"
 	authHttp "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/transport/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/repositories"
-	userServices "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/services"
-	userHttp "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/users/transport/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/config"
 )
 
@@ -26,15 +26,23 @@ func runServer(cfg *config.Config) error {
 	}
 	defer db.Close()
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer redisClient.Close()
+
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		return fmt.Errorf("failed to connect to redis: %w", err)
+	}
+
 	clock := &datetime.RealClock{}
 
-	// user feature
 	userRepo := repositories.NewUserRepository(db)
-	userService := userServices.NewUserService(userRepo, clock)
-	userHandler := userHttp.NewUserHandler(userService)
 
 	// auth feature
-	refreshTokenRepo := authRepositories.NewRefreshTokenRepository(db)
+	refreshTokenRepo := authRepositories.NewRefreshTokenRepository(redisClient)
 	authService := authServices.NewAuthService(userRepo, refreshTokenRepo, clock, authServices.TokenConfig{
 		JWTIssuer:       cfg.Auth.JWTIssuer,
 		JWTAccessSecret: cfg.Auth.JWTAccessSecret,
@@ -60,7 +68,6 @@ func runServer(cfg *config.Config) error {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		userHandler.RegisterV1(r)
 		authHandler.RegisterV1(r)
 	})
 

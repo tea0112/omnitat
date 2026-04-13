@@ -40,6 +40,11 @@ var ErrLoginFailed = HTTPErrorDef{
 	DefaultMessage: "failed to process request",
 }
 
+var ErrSignupFailed = HTTPErrorDef{
+	Code:           "SIGNUP_FAILED",
+	DefaultMessage: "failed to process request",
+}
+
 var ErrUserInactive = HTTPErrorDef{
 	Code:           "USER_INACTIVE",
 	DefaultMessage: "user account is inactive",
@@ -48,4 +53,19 @@ var ErrUserInactive = HTTPErrorDef{
 var ErrInvalidCredentials = HTTPErrorDef{
 	Code:           "INVALID_CREDENTIALS",
 	DefaultMessage: "invalid credentials",
+}
+
+var ErrInvalidRefreshToken = HTTPErrorDef{
+	Code:           "INVALID_REFRESH_TOKEN",
+	DefaultMessage: "invalid refresh token",
+}
+
+var ErrRefreshFailed = HTTPErrorDef{
+	Code:           "REFRESH_FAILED",
+	DefaultMessage: "failed to process request",
+}
+
+var ErrLogoutFailed = HTTPErrorDef{
+	Code:           "LOGOUT_FAILED",
+	DefaultMessage: "failed to process request",
 }

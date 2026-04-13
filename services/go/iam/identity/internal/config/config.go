@@ -11,7 +11,14 @@ import (
 type Config struct {
 	HTTP     libHttp.Config
 	Database libDatabase.DatabaseConfig
+	Redis    RedisConfig
 	Auth     AuthConfig
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
 }
 
 type AuthConfig struct {
@@ -52,6 +59,10 @@ func Load() (*Config, error) {
 	cfg.Database.ConnMaxIdleTime = dbConnMaxIdleTimeDuration
 
 	// Auth config
+	cfg.Redis.Addr = config.GetEnv("REDIS_ADDR", "localhost:6379")
+	cfg.Redis.Password = config.GetEnv("REDIS_PASSWORD", "")
+	cfg.Redis.DB = config.GetEnv("REDIS_DB", 0)
+
 	cfg.Auth.JWTIssuer = config.GetEnv("JWT_ISSUER", "identity-service")
 	cfg.Auth.JWTAccessSecret = config.GetEnv("JWT_ACCESS_SECRET", "dev-access-secret")
 

@@ -19,6 +19,18 @@ type RefreshToken struct {
 	UpdatedAt  time.Time  `db:"updated_at"`
 }
 
+func (t *RefreshToken) IsRevoked() bool {
+	return t != nil && t.RevokedAt != nil
+}
+
+func (t *RefreshToken) IsExpired(now time.Time) bool {
+	if t == nil {
+		return true
+	}
+
+	return !now.Before(t.ExpiresAt)
+}
+
 func NewRefreshToken(userID uuid.UUID, tokenHash string, now, expiresAt time.Time) (*RefreshToken, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
