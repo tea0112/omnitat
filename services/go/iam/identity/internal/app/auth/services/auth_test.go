@@ -111,11 +111,67 @@ func (s *fakeRefreshTokenStore) FindByTokenHash(_ context.Context, tokenHash str
 	return token, nil
 }
 
+func (s *fakeRefreshTokenStore) ListSessionsByUserID(_ context.Context, userID uuid.UUID, now time.Time) ([]*models.SessionInfo, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+
+	byFamily := map[uuid.UUID]*models.RefreshToken{}
+	for _, token := range s.tokens {
+		if token.UserID != userID || token.IsExpired(now) {
+			continue
+		}
+		familyID := token.EffectiveFamilyID()
+		current, ok := byFamily[familyID]
+		if !ok || token.CreatedAt.After(current.CreatedAt) {
+			byFamily[familyID] = token
+		}
+	}
+
+	sessions := make([]*models.SessionInfo, 0, len(byFamily))
+	for familyID, token := range byFamily {
+		sessions = append(sessions, &models.SessionInfo{
+			ID:         familyID,
+			UserID:     token.UserID,
+			UserAgent:  token.UserAgent,
+			IPAddress:  token.IPAddress,
+			CreatedAt:  token.CreatedAt,
+			UpdatedAt:  token.UpdatedAt,
+			LastUsedAt: token.LastUsedAt,
+			ExpiresAt:  token.ExpiresAt,
+			RevokedAt:  token.RevokedAt,
+		})
+	}
+
+	return sessions, nil
+}
+
 func (s *fakeRefreshTokenStore) RevokeByTokenHash(_ context.Context, tokenHash string, _ time.Time) error {
 	if s.err != nil {
 		return s.err
 	}
-	delete(s.tokens, tokenHash)
+	token, ok := s.tokens[tokenHash]
+	if !ok {
+		return nil
+	}
+	now := time.Now().UTC()
+	token.RevokedAt = &now
+	token.UpdatedAt = now
+	return nil
+}
+
+func (s *fakeRefreshTokenStore) RevokeFamily(_ context.Context, familyID uuid.UUID, _ time.Time) error {
+	if s.err != nil {
+		return s.err
+	}
+	now := time.Now().UTC()
+	for _, token := range s.tokens {
+		if token.EffectiveFamilyID() != familyID {
+			continue
+		}
+		token.RevokedAt = &now
+		token.UpdatedAt = now
+	}
 	return nil
 }
 
@@ -123,10 +179,15 @@ func (s *fakeRefreshTokenStore) Rotate(_ context.Context, currentTokenHash strin
 	if s.err != nil {
 		return s.err
 	}
-	if _, ok := s.tokens[currentTokenHash]; !ok {
+	currentToken, ok := s.tokens[currentTokenHash]
+	if !ok {
 		return sql.ErrNoRows
 	}
-	delete(s.tokens, currentTokenHash)
+	familyID := currentToken.EffectiveFamilyID()
+	newToken.FamilyID = familyID
+	now := time.Now().UTC()
+	currentToken.RevokedAt = &now
+	currentToken.UpdatedAt = now
 	s.tokens[newToken.TokenHash] = newToken
 	return nil
 }
@@ -147,6 +208,8 @@ func TestSignUpNormalizesEmailAndStoresRefreshToken(t *testing.T) {
 		Password:  "StrongPass123!",
 		FirstName: "John",
 		LastName:  "Doe",
+		UserAgent: "test-agent",
+		IPAddress: "203.0.113.10",
 	})
 	if err != nil {
 		t.Fatalf("SignUp() error = %v", err)
@@ -159,6 +222,14 @@ func TestSignUpNormalizesEmailAndStoresRefreshToken(t *testing.T) {
 	}
 	if len(refreshStore.tokens) != 1 {
 		t.Fatalf("expected 1 stored refresh token, got %d", len(refreshStore.tokens))
+	}
+	for _, token := range refreshStore.tokens {
+		if token.UserAgent == nil || *token.UserAgent != "test-agent" {
+			t.Fatal("expected refresh token user agent to be stored")
+		}
+		if token.IPAddress == nil || *token.IPAddress != "203.0.113.10" {
+			t.Fatal("expected refresh token ip address to be stored")
+		}
 	}
 	storedUser, err := userStore.FindByEmail(context.Background(), "test@example.com")
 	if err != nil {
@@ -189,18 +260,25 @@ func TestRefreshRotatesRefreshToken(t *testing.T) {
 		RefreshTokenTTL: 24 * time.Hour,
 	})
 
-	pair, err := service.Refresh(context.Background(), dto.RefreshRequestDTO{RefreshToken: currentRaw})
+	pair, err := service.Refresh(context.Background(), dto.RefreshRequestDTO{RefreshToken: currentRaw, UserAgent: "rotated-agent", IPAddress: "198.51.100.20"})
 	if err != nil {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 	if pair.RefreshToken == "" || pair.RefreshToken == currentRaw {
 		t.Fatal("expected a new refresh token to be returned")
 	}
-	if _, ok := refreshStore.tokens[currentHash]; ok {
-		t.Fatal("expected old refresh token to be removed")
+	if refreshStore.tokens[currentHash].RevokedAt == nil {
+		t.Fatal("expected old refresh token to be revoked")
 	}
 	if _, ok := refreshStore.tokens[hashToken(pair.RefreshToken)]; !ok {
 		t.Fatal("expected new refresh token to be stored")
+	}
+	rotatedToken := refreshStore.tokens[hashToken(pair.RefreshToken)]
+	if rotatedToken.UserAgent == nil || *rotatedToken.UserAgent != "rotated-agent" {
+		t.Fatal("expected rotated token user agent to be updated")
+	}
+	if rotatedToken.IPAddress == nil || *rotatedToken.IPAddress != "198.51.100.20" {
+		t.Fatal("expected rotated token ip address to be updated")
 	}
 }
 
@@ -219,8 +297,37 @@ func TestLogoutRevokesRefreshToken(t *testing.T) {
 	if err := service.Logout(context.Background(), dto.LogoutRequestDTO{RefreshToken: currentRaw}); err != nil {
 		t.Fatalf("Logout() error = %v", err)
 	}
-	if _, ok := refreshStore.tokens[currentHash]; ok {
-		t.Fatal("expected refresh token to be removed")
+	if refreshStore.tokens[currentHash].RevokedAt == nil {
+		t.Fatal("expected refresh token to be revoked")
+	}
+}
+
+func TestRefreshReuseRevokesTokenFamily(t *testing.T) {
+	now := time.Date(2026, 4, 13, 12, 0, 0, 0, time.UTC)
+	email := "user@example.com"
+	familyID := uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789099")
+	user := &userModels.User{Id: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789012"), Email: &email, IsActive: true, CreatedAt: now, UpdatedAt: now}
+	oldRaw := "old-refresh-token"
+	activeRaw := "active-refresh-token"
+	revokedAt := now.Add(-5 * time.Minute)
+	oldToken := &models.RefreshToken{ID: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789013"), FamilyID: familyID, UserID: user.Id, TokenHash: hashToken(oldRaw), ExpiresAt: now.Add(24 * time.Hour), RevokedAt: &revokedAt, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: revokedAt}
+	activeToken := &models.RefreshToken{ID: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789014"), FamilyID: familyID, UserID: user.Id, TokenHash: hashToken(activeRaw), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+
+	userStore := newFakeUserStore(user)
+	refreshStore := newFakeRefreshTokenStore(oldToken, activeToken)
+	service := NewAuthService(userStore, refreshStore, &fakeClock{now: now}, TokenConfig{
+		JWTIssuer:       "identity-service",
+		JWTAccessSecret: "test-secret",
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 24 * time.Hour,
+	})
+
+	_, err := service.Refresh(context.Background(), dto.RefreshRequestDTO{RefreshToken: oldRaw})
+	if !errors.Is(err, apperrors.ErrInvalidRefreshToken) {
+		t.Fatalf("expected ErrInvalidRefreshToken, got %v", err)
+	}
+	if refreshStore.tokens[hashToken(activeRaw)].RevokedAt == nil {
+		t.Fatal("expected active token to be revoked after replay detection")
 	}
 }
 
@@ -235,5 +342,63 @@ func TestSignInReturnsInvalidCredentialsForUnknownEmail(t *testing.T) {
 	_, err := service.SignIn(context.Background(), dto.SignInRequestDTO{Email: "missing@example.com", Password: "Secret123!"})
 	if !errors.Is(err, apperrors.ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+}
+
+func TestListSessionsReturnsUserSessions(t *testing.T) {
+	now := time.Now().UTC()
+	email := "user@example.com"
+	user := &userModels.User{Id: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789012"), Email: &email, IsActive: true, CreatedAt: now, UpdatedAt: now}
+	agent := "session-agent"
+	ip := "198.51.100.44"
+	familyID := uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789015")
+	refreshToken := &models.RefreshToken{ID: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789016"), FamilyID: familyID, UserID: user.Id, TokenHash: hashToken("session-refresh"), UserAgent: &agent, IPAddress: &ip, ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+
+	userStore := newFakeUserStore(user)
+	refreshStore := newFakeRefreshTokenStore(refreshToken)
+	service := NewAuthService(userStore, refreshStore, &fakeClock{now: now}, TokenConfig{
+		JWTIssuer:       "identity-service",
+		JWTAccessSecret: "test-secret",
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 24 * time.Hour,
+	})
+
+	sessions, err := service.ListSessions(context.Background(), user.Id)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].ID != familyID {
+		t.Fatalf("expected session id %s, got %s", familyID, sessions[0].ID)
+	}
+	if sessions[0].UserAgent != agent || sessions[0].IPAddress != ip {
+		t.Fatal("expected session metadata to be returned")
+	}
+}
+
+func TestRevokeSessionRevokesFamily(t *testing.T) {
+	now := time.Now().UTC()
+	email := "user@example.com"
+	user := &userModels.User{Id: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789012"), Email: &email, IsActive: true, CreatedAt: now, UpdatedAt: now}
+	familyID := uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789015")
+	first := &models.RefreshToken{ID: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789016"), FamilyID: familyID, UserID: user.Id, TokenHash: hashToken("session-refresh-1"), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)}
+	second := &models.RefreshToken{ID: uuid.MustParse("01962da8-90b6-7a1a-b5f3-123456789017"), FamilyID: familyID, UserID: user.Id, TokenHash: hashToken("session-refresh-2"), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+
+	userStore := newFakeUserStore(user)
+	refreshStore := newFakeRefreshTokenStore(first, second)
+	service := NewAuthService(userStore, refreshStore, &fakeClock{now: now}, TokenConfig{
+		JWTIssuer:       "identity-service",
+		JWTAccessSecret: "test-secret",
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 24 * time.Hour,
+	})
+
+	if err := service.RevokeSession(context.Background(), user.Id, familyID); err != nil {
+		t.Fatalf("RevokeSession() error = %v", err)
+	}
+	if refreshStore.tokens[first.TokenHash].RevokedAt == nil || refreshStore.tokens[second.TokenHash].RevokedAt == nil {
+		t.Fatal("expected all tokens in session family to be revoked")
 	}
 }

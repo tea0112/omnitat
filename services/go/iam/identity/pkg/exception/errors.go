@@ -60,6 +60,16 @@ var ErrInvalidRefreshToken = HTTPErrorDef{
 	DefaultMessage: "invalid refresh token",
 }
 
+var ErrInvalidAccessToken = HTTPErrorDef{
+	Code:           "INVALID_ACCESS_TOKEN",
+	DefaultMessage: "invalid access token",
+}
+
+var ErrSessionNotFound = HTTPErrorDef{
+	Code:           "SESSION_NOT_FOUND",
+	DefaultMessage: "session not found",
+}
+
 var ErrRefreshFailed = HTTPErrorDef{
 	Code:           "REFRESH_FAILED",
 	DefaultMessage: "failed to process request",
@@ -68,4 +78,19 @@ var ErrRefreshFailed = HTTPErrorDef{
 var ErrLogoutFailed = HTTPErrorDef{
 	Code:           "LOGOUT_FAILED",
 	DefaultMessage: "failed to process request",
+}
+
+var ErrSessionListFailed = HTTPErrorDef{
+	Code:           "SESSION_LIST_FAILED",
+	DefaultMessage: "failed to process request",
+}
+
+var ErrSessionRevokeFailed = HTTPErrorDef{
+	Code:           "SESSION_REVOKE_FAILED",
+	DefaultMessage: "failed to process request",
+}
+
+var ErrRateLimited = HTTPErrorDef{
+	Code:           "RATE_LIMITED",
+	DefaultMessage: "too many requests",
 }

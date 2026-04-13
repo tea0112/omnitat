@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/tea0112/omnitat/libs/go/datetime"
 	"github.com/tea0112/omnitat/libs/go/security"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/domains"
@@ -87,7 +88,7 @@ func (s *AuthServiceImpl) SignIn(ctx context.Context, signInRequestDTO dto.SignI
 
 	slog.Info("signin success", "user_id", userModel.Id.String(), "email", normalizedEmail)
 
-	return s.issueSession(ctx, userModel, s.clock.Now())
+	return s.issueSession(ctx, userModel, s.clock.Now(), signInRequestDTO.UserAgent, signInRequestDTO.IPAddress)
 }
 
 func (s *AuthServiceImpl) SignUp(ctx context.Context, signUpRequestDTO dto.SignUpRequestDTO) (*domains.Session, error) {
@@ -125,7 +126,7 @@ func (s *AuthServiceImpl) SignUp(ctx context.Context, signUpRequestDTO dto.SignU
 
 	slog.Info("signup success", "user_id", user.Id.String(), "email", normalizedEmail)
 
-	return s.issueSession(ctx, user, now)
+	return s.issueSession(ctx, user, now, signUpRequestDTO.UserAgent, signUpRequestDTO.IPAddress)
 }
 
 func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.RefreshRequestDTO) (*domains.TokenPair, error) {
@@ -140,7 +141,16 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.Ref
 		return nil, err
 	}
 
-	if storedToken.IsRevoked() || storedToken.IsExpired(now) {
+	if storedToken.IsRevoked() {
+		if err := s.refreshTokenStore.RevokeFamily(ctx, storedToken.EffectiveFamilyID(), now); err != nil {
+			slog.Error("failed to revoke refresh token family after replay", "family_id", storedToken.EffectiveFamilyID().String(), "error", err.Error())
+			return nil, fmt.Errorf("revoke refresh token family: %w", err)
+		}
+
+		return nil, apperrors.ErrInvalidRefreshToken
+	}
+
+	if storedToken.IsExpired(now) {
 		return nil, apperrors.ErrInvalidRefreshToken
 	}
 
@@ -181,6 +191,7 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.Ref
 		slog.Error(err.Error())
 		return nil, fmt.Errorf("new refresh token: %w", err)
 	}
+	applyRefreshTokenMetadata(refreshToken, refreshRequestDTO.UserAgent, refreshRequestDTO.IPAddress)
 
 	err = s.refreshTokenStore.Rotate(ctx, tokenHash, refreshToken, now)
 	if err != nil {
@@ -208,6 +219,48 @@ func (s *AuthServiceImpl) Logout(ctx context.Context, logoutRequestDTO dto.Logou
 	}
 
 	return nil
+}
+
+func (s *AuthServiceImpl) ListSessions(ctx context.Context, userID uuid.UUID) ([]domains.SessionInfo, error) {
+	sessions, err := s.refreshTokenStore.ListSessionsByUserID(ctx, userID, s.clock.Now())
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	result := make([]domains.SessionInfo, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+
+		result = append(result, domains.SessionInfo{
+			ID:         session.ID,
+			UserAgent:  derefString(session.UserAgent),
+			IPAddress:  derefString(session.IPAddress),
+			CreatedAt:  session.CreatedAt,
+			UpdatedAt:  session.UpdatedAt,
+			LastUsedAt: session.LastUsedAt,
+			ExpiresAt:  session.ExpiresAt,
+			RevokedAt:  session.RevokedAt,
+		})
+	}
+
+	return result, nil
+}
+
+func (s *AuthServiceImpl) RevokeSession(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID) error {
+	sessions, err := s.refreshTokenStore.ListSessionsByUserID(ctx, userID, s.clock.Now())
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
+	for _, session := range sessions {
+		if session != nil && session.ID == sessionID {
+			return s.refreshTokenStore.RevokeFamily(ctx, sessionID, s.clock.Now())
+		}
+	}
+
+	return apperrors.ErrSessionNotFound
 }
 
 type accessTokenClaims struct {
@@ -245,7 +298,7 @@ func isDuplicateKeyError(err error) bool {
 	return strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint")
 }
 
-func (s *AuthServiceImpl) issueSession(ctx context.Context, userModel *userModels.User, now time.Time) (*domains.Session, error) {
+func (s *AuthServiceImpl) issueSession(ctx context.Context, userModel *userModels.User, now time.Time, userAgent, ipAddress string) (*domains.Session, error) {
 	accessToken, err := s.generateAccessToken(userModel, now)
 	if err != nil {
 		slog.Error(err.Error())
@@ -267,6 +320,7 @@ func (s *AuthServiceImpl) issueSession(ctx context.Context, userModel *userModel
 		slog.Error(err.Error())
 		return nil, fmt.Errorf("new refresh token: %w", err)
 	}
+	applyRefreshTokenMetadata(refreshToken, userAgent, ipAddress)
 
 	err = s.refreshTokenStore.Create(ctx, refreshToken)
 	if err != nil {
@@ -301,4 +355,29 @@ func generateOpaqueToken() (string, error) {
 func hashToken(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func applyRefreshTokenMetadata(token *authModels.RefreshToken, userAgent, ipAddress string) {
+	if token == nil {
+		return
+	}
+
+	userAgent = strings.TrimSpace(userAgent)
+	ipAddress = strings.TrimSpace(ipAddress)
+
+	if userAgent != "" {
+		token.UserAgent = &userAgent
+	}
+
+	if ipAddress != "" {
+		token.IPAddress = &ipAddress
+	}
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+
+	return *value
 }

@@ -3,13 +3,17 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	httpLib "github.com/tea0112/omnitat/libs/go/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/services"
 	"github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/transport/http/dto"
+	httpapi "github.com/tea0112/omnitat/services/go/iam/identity/internal/http"
 	"github.com/tea0112/omnitat/services/go/iam/identity/pkg/apperrors"
 	"github.com/tea0112/omnitat/services/go/iam/identity/pkg/exception"
 )
@@ -19,12 +23,14 @@ var loginEmailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[
 const MinPasswordLength = 8
 
 type AuthHandler struct {
-	authService AuthService
+	authService     AuthService
+	jwtAccessSecret []byte
 }
 
-func NewAuthHandler(authServiceImpl services.AuthServiceImpl) *AuthHandler {
+func NewAuthHandler(authServiceImpl services.AuthServiceImpl, jwtAccessSecret string) *AuthHandler {
 	return &AuthHandler{
-		authService: &authServiceImpl,
+		authService:     &authServiceImpl,
+		jwtAccessSecret: []byte(jwtAccessSecret),
 	}
 }
 
@@ -50,6 +56,8 @@ func (h *AuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidEmail.Code, exception.ErrInvalidEmail.DefaultMessage))
 		return
 	}
+
+	populateClientMetadata(&signInRequestDTO.UserAgent, &signInRequestDTO.IPAddress, r)
 
 	session, err := h.authService.SignIn(r.Context(), signInRequestDTO)
 	if err != nil {
@@ -103,6 +111,8 @@ func (h *AuthHandler) SignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	populateClientMetadata(&signUpRequestDTO.UserAgent, &signUpRequestDTO.IPAddress, r)
+
 	session, err := h.authService.SignUp(r.Context(), signUpRequestDTO)
 	if err != nil {
 		if errors.Is(err, apperrors.ErrEmailAlreadyExists) {
@@ -136,6 +146,8 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidData.Code, "refresh_token is required"))
 		return
 	}
+
+	populateClientMetadata(&refreshRequestDTO.UserAgent, &refreshRequestDTO.IPAddress, r)
 
 	tokenPair, err := h.authService.Refresh(r.Context(), refreshRequestDTO)
 	if err != nil {
@@ -187,7 +199,93 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *AuthHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	setNoStoreHeaders(w)
+
+	userID, ok := httpapi.UserIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidAccessToken.Code, exception.ErrInvalidAccessToken.DefaultMessage))
+		return
+	}
+
+	sessions, err := h.authService.ListSessions(r.Context(), userID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrSessionListFailed.Code, exception.ErrSessionListFailed.DefaultMessage))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(sessions)
+}
+
+func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
+	setNoStoreHeaders(w)
+
+	sessionID, err := uuid.Parse(chi.URLParam(r, "sessionID"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidData.Code, "session_id is invalid"))
+		return
+	}
+
+	userID, ok := httpapi.UserIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrInvalidAccessToken.Code, exception.ErrInvalidAccessToken.DefaultMessage))
+		return
+	}
+
+	err = h.authService.RevokeSession(r.Context(), userID, sessionID)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrSessionNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrSessionNotFound.Code, exception.ErrSessionNotFound.DefaultMessage))
+			return
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(httpLib.ErrorResponseCode(exception.ErrSessionRevokeFailed.Code, exception.ErrSessionRevokeFailed.DefaultMessage))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func setNoStoreHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
+}
+
+func populateClientMetadata(userAgent *string, ipAddress *string, r *http.Request) {
+	if userAgent != nil {
+		*userAgent = strings.TrimSpace(r.UserAgent())
+	}
+
+	if ipAddress != nil {
+		*ipAddress = clientIP(r)
+	}
+}
+
+func clientIP(r *http.Request) string {
+	forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if forwardedFor != "" {
+		parts := strings.Split(forwardedFor, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+	if realIP != "" {
+		return realIP
+	}
+
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+
+	return strings.TrimSpace(r.RemoteAddr)
 }

@@ -18,6 +18,8 @@ type UserStore interface {
 type RefreshTokenStore interface {
 	Create(ctx context.Context, token *authModels.RefreshToken) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*authModels.RefreshToken, error)
+	ListSessionsByUserID(ctx context.Context, userID uuid.UUID, now time.Time) ([]*authModels.SessionInfo, error)
 	RevokeByTokenHash(ctx context.Context, tokenHash string, revokedAt time.Time) error
+	RevokeFamily(ctx context.Context, familyID uuid.UUID, revokedAt time.Time) error
 	Rotate(ctx context.Context, currentTokenHash string, newToken *authModels.RefreshToken, now time.Time) error
 }

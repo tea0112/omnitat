@@ -49,7 +49,7 @@ func runServer(cfg *config.Config) error {
 		AccessTokenTTL:  cfg.Auth.AccessTokenTTL,
 		RefreshTokenTTL: cfg.Auth.RefreshTokenTTL,
 	})
-	authHandler := authHttp.NewAuthHandler(*authService)
+	authHandler := authHttp.NewAuthHandler(*authService, cfg.Auth.JWTAccessSecret)
 
 	r := chi.NewRouter()
 

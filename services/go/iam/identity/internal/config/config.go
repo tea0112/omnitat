@@ -1,12 +1,16 @@
 package config
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tea0112/omnitat/libs/go/config"
 	libDatabase "github.com/tea0112/omnitat/libs/go/database"
 	libHttp "github.com/tea0112/omnitat/libs/go/http"
 )
+
+const defaultJWTAccessSecret = "dev-access-secret"
 
 type Config struct {
 	HTTP     libHttp.Config
@@ -63,8 +67,15 @@ func Load() (*Config, error) {
 	cfg.Redis.Password = config.GetEnv("REDIS_PASSWORD", "")
 	cfg.Redis.DB = config.GetEnv("REDIS_DB", 0)
 
+	appEnv := strings.ToLower(strings.TrimSpace(config.GetEnv("APP_ENV", "local")))
+	if appEnv == "" {
+		appEnv = "local"
+	}
 	cfg.Auth.JWTIssuer = config.GetEnv("JWT_ISSUER", "identity-service")
-	cfg.Auth.JWTAccessSecret = config.GetEnv("JWT_ACCESS_SECRET", "dev-access-secret")
+	cfg.Auth.JWTAccessSecret = config.GetEnv("JWT_ACCESS_SECRET", defaultJWTAccessSecret)
+	if err := validateJWTAccessSecret(appEnv, cfg.Auth.JWTAccessSecret); err != nil {
+		return nil, fmt.Errorf("load auth config: %w", err)
+	}
 
 	accessTokenTTLStr := config.GetEnv("JWT_ACCESS_TTL", "15m")
 	accessTokenTTL, err := time.ParseDuration(accessTokenTTLStr)
@@ -81,4 +92,26 @@ func Load() (*Config, error) {
 	cfg.Auth.RefreshTokenTTL = refreshTokenTTL
 
 	return &cfg, nil
+}
+
+func validateJWTAccessSecret(appEnv string, secret string) error {
+	if isLocalAppEnv(appEnv) {
+		return nil
+	}
+
+	secret = strings.TrimSpace(secret)
+	if secret == "" || secret == defaultJWTAccessSecret {
+		return fmt.Errorf("APP_ENV=%s requires JWT_ACCESS_SECRET to be set to a non-default value", appEnv)
+	}
+
+	return nil
+}
+
+func isLocalAppEnv(appEnv string) bool {
+	switch appEnv {
+	case "", "local", "dev", "development", "test":
+		return true
+	default:
+		return false
+	}
 }
