@@ -20,6 +20,38 @@ type RefreshToken struct {
 	UpdatedAt  time.Time  `db:"updated_at"`
 }
 
+func RefreshTokenFields() *RefreshTokenField {
+	return &RefreshTokenField{
+		TableName:        "refresh_tokens",
+		IDColumn:         "id",
+		FamilyIDColumn:   "family_id",
+		UserIDColumn:     "user_id",
+		TokenHashColumn:  "token_hash",
+		ExpiresAtColumn:  "expires_at",
+		RevokedAtColumn:  "revoked_at",
+		LastUsedAtColumn: "last_used_at",
+		UserAgentColumn:  "user_agent",
+		IPAddressColumn:  "ip_address",
+		CreatedAtColumn:  "created_at",
+		UpdatedAtColumn:  "updated_at",
+	}
+}
+
+type RefreshTokenField struct {
+	TableName        string
+	IDColumn         string
+	FamilyIDColumn   string
+	UserIDColumn     string
+	TokenHashColumn  string
+	ExpiresAtColumn  string
+	RevokedAtColumn  string
+	LastUsedAtColumn string
+	UserAgentColumn  string
+	IPAddressColumn  string
+	CreatedAtColumn  string
+	UpdatedAtColumn  string
+}
+
 type SessionInfo struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID

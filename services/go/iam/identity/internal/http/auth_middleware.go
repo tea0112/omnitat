@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -21,6 +22,7 @@ func RequireBearerAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenValue := bearerToken(r)
 			if tokenValue == "" {
+				slog.Warn("access token rejected", "event", "auth.access.rejected", "reason", "missing_bearer_token", "path", r.URL.Path, "method", r.Method, "remote_addr", r.RemoteAddr)
 				writeUnauthorized(w)
 				return
 			}
@@ -33,12 +35,14 @@ func RequireBearerAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 				return jwtSecret, nil
 			})
 			if err != nil || token == nil || !token.Valid {
+				slog.Warn("access token rejected", "event", "auth.access.rejected", "reason", "invalid_token", "path", r.URL.Path, "method", r.Method, "remote_addr", r.RemoteAddr)
 				writeUnauthorized(w)
 				return
 			}
 
 			userID, err := uuid.Parse(claims.Subject)
 			if err != nil {
+				slog.Warn("access token rejected", "event", "auth.access.rejected", "reason", "invalid_subject", "path", r.URL.Path, "method", r.Method, "remote_addr", r.RemoteAddr)
 				writeUnauthorized(w)
 				return
 			}

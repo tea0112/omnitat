@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	stdHttp "net/http"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/redis/go-redis/v9"
 	libDatabase "github.com/tea0112/omnitat/libs/go/database"
 	"github.com/tea0112/omnitat/libs/go/datetime"
 	authRepositories "github.com/tea0112/omnitat/services/go/iam/identity/internal/app/auth/repositories"
@@ -26,23 +24,12 @@ func runServer(cfg *config.Config) error {
 	}
 	defer db.Close()
 
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-	defer redisClient.Close()
-
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		return fmt.Errorf("failed to connect to redis: %w", err)
-	}
-
 	clock := &datetime.RealClock{}
 
 	userRepo := repositories.NewUserRepository(db)
 
 	// auth feature
-	refreshTokenRepo := authRepositories.NewRefreshTokenRepository(redisClient)
+	refreshTokenRepo := authRepositories.NewRefreshTokenRepository(db)
 	authService := authServices.NewAuthService(userRepo, refreshTokenRepo, clock, authServices.TokenConfig{
 		JWTIssuer:       cfg.Auth.JWTIssuer,
 		JWTAccessSecret: cfg.Auth.JWTAccessSecret,

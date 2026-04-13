@@ -136,21 +136,26 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.Ref
 	storedToken, err := s.refreshTokenStore.FindByTokenHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("refresh token rejected", "event", "auth.refresh.rejected", "reason", "not_found", "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
 			return nil, apperrors.ErrInvalidRefreshToken
 		}
 		return nil, err
 	}
 
 	if storedToken.IsRevoked() {
+		slog.Warn("refresh token replay detected", "event", "auth.refresh.replay_detected", "user_id", storedToken.UserID.String(), "family_id", storedToken.EffectiveFamilyID().String(), "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
 		if err := s.refreshTokenStore.RevokeFamily(ctx, storedToken.EffectiveFamilyID(), now); err != nil {
 			slog.Error("failed to revoke refresh token family after replay", "family_id", storedToken.EffectiveFamilyID().String(), "error", err.Error())
 			return nil, fmt.Errorf("revoke refresh token family: %w", err)
 		}
 
+		slog.Warn("refresh token family revoked", "event", "auth.refresh.family_revoked", "reason", "replay_detected", "user_id", storedToken.UserID.String(), "family_id", storedToken.EffectiveFamilyID().String(), "revoked_at", now, "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
+
 		return nil, apperrors.ErrInvalidRefreshToken
 	}
 
 	if storedToken.IsExpired(now) {
+		slog.Warn("refresh token rejected", "event", "auth.refresh.rejected", "reason", "expired", "user_id", storedToken.UserID.String(), "family_id", storedToken.EffectiveFamilyID().String(), "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
 		return nil, apperrors.ErrInvalidRefreshToken
 	}
 
@@ -196,11 +201,14 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.Ref
 	err = s.refreshTokenStore.Rotate(ctx, tokenHash, refreshToken, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("refresh token rejected", "event", "auth.refresh.rejected", "reason", "rotate_target_missing", "user_id", userModel.Id.String(), "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
 			return nil, apperrors.ErrInvalidRefreshToken
 		}
 		slog.Error("failed to rotate refresh token", "user_id", userModel.Id.String(), "error", err.Error())
 		return nil, fmt.Errorf("rotate refresh token: %w", err)
 	}
+
+	slog.Info("refresh token rotated", "event", "auth.refresh.rotated", "user_id", userModel.Id.String(), "family_id", refreshToken.EffectiveFamilyID().String(), "ip_address", refreshRequestDTO.IPAddress, "user_agent", refreshRequestDTO.UserAgent)
 
 	slog.Info("refresh success", "user_id", userModel.Id.String())
 
@@ -213,10 +221,26 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, refreshRequestDTO dto.Ref
 }
 
 func (s *AuthServiceImpl) Logout(ctx context.Context, logoutRequestDTO dto.LogoutRequestDTO) error {
-	err := s.refreshTokenStore.RevokeByTokenHash(ctx, hashToken(logoutRequestDTO.RefreshToken), s.clock.Now())
+	now := s.clock.Now()
+	tokenHash := hashToken(logoutRequestDTO.RefreshToken)
+	storedToken, err := s.refreshTokenStore.FindByTokenHash(ctx, tokenHash)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("find refresh token for logout: %w", err)
+	}
+
+	tokenFound := err == nil && storedToken != nil
+
+	err = s.refreshTokenStore.RevokeByTokenHash(ctx, tokenHash, now)
 	if err != nil {
 		return fmt.Errorf("revoke refresh token: %w", err)
 	}
+
+	if !tokenFound {
+		slog.Warn("logout requested for unknown refresh token", "event", "auth.logout.revoke_requested", "reason", "not_found")
+		return nil
+	}
+
+	slog.Info("refresh token revoked on logout", "event", "auth.logout.refresh_revoked", "user_id", storedToken.UserID.String(), "family_id", storedToken.EffectiveFamilyID().String(), "revoked_at", now)
 
 	return nil
 }
@@ -327,6 +351,8 @@ func (s *AuthServiceImpl) issueSession(ctx context.Context, userModel *userModel
 		slog.Error("failed to persist refresh token", "user_id", userModel.Id.String(), "error", err.Error())
 		return nil, fmt.Errorf("persist refresh token: %w", err)
 	}
+
+	slog.Info("refresh token issued", "event", "auth.refresh.issued", "user_id", userModel.Id.String(), "family_id", refreshToken.EffectiveFamilyID().String(), "ip_address", ipAddress, "user_agent", userAgent)
 
 	userDomain := domains.ModelUserToDomain(userModel)
 	if userDomain == nil {
